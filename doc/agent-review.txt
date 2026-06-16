@@ -1,0 +1,59 @@
+*agent-review.txt*  In-editor code review with agent handoff
+
+==============================================================================
+INTRODUCTION                                              *agent-review*
+
+agent-review.nvim lets you leave inline comments on any file in a repo and
+hand them off to a coding agent. Comments are saved to
+`<repo>/.review/comments.json`. In an agent, say "process my review comments"
+and it walks through every unresolved entry.
+
+Built on diffview.nvim, but Diffview is optional: |<leader>rc| works in any
+buffer whose file lives under the repo root.
+
+==============================================================================
+SETUP                                                     *agent-review-setup*
+
+>lua
+    require("agent-review").setup()
+<
+This registers the |:ReviewStart|, |:ReviewComment| and |:ReviewRefresh|
+commands. `setup()` accepts an options table reserved for future use.
+
+==============================================================================
+COMMANDS                                               *agent-review-commands*
+
+:ReviewStart [args]                                       *:ReviewStart*
+    Open the Diffview review UI. Extra args are passed to |:DiffviewOpen|,
+    e.g. `:ReviewStart origin/main...HEAD`.
+
+:ReviewComment                                            *:ReviewComment*
+    Add or edit a review comment on the current line.
+
+:ReviewRefresh                                            *:ReviewRefresh*
+    Reload comments from disk and re-render them.
+
+==============================================================================
+MAPPINGS                                               *agent-review-mappings*
+
+<leader>rc   Add / edit review comment on the current line
+<leader>rd   Delete review comment
+<leader>rx   Toggle comment resolved
+<leader>rs   Save review
+<leader>rq   Save review and quit
+<leader>rn   Jump to next comment in buffer
+<leader>rp   Jump to previous comment in buffer
+<leader>rr   Refresh review
+<leader>rR   Start / restart the Diffview review
+
+In the comment popup: <C-s> saves, q cancels.
+
+==============================================================================
+DATA                                                      *agent-review-data*
+
+Comments are written to `<repo>/.review/comments.json`. Each entry has
+`file`, `side` ("new" working tree / "old" base revision), `line`, `code`
+(line text at comment time, used to re-anchor on drift), `body` and
+`resolved`. The `.review/` dir is added to `.git/info/exclude` automatically.
+
+vim:tw=78:ts=8:ft=help:norl:
