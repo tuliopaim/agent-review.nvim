@@ -28,7 +28,7 @@ Start by summarizing your read of each comment — fix, discuss, or obsolete —
 
 ## Notes
 
-- Side `new` is a line in the working tree; `old` is a line in the base revision (read it with `git show`).
+- Side `new` is a line in the working tree; `old` is a line in the base revision. To read an `old` line, resolve the base from the top-level `scope` field: `"working tree"` → base is `HEAD`; a diffview range like `"origin/main...HEAD"` → base is its merge-base. Then read with `git show <base>:<file>` rather than the current file.
 - **Line drift:** `line`/`endLine` are anchors from save time and may have moved if the user edited afterwards. Treat them as hints. Compare `code` to the current text at `file:line` (and `endCode` at `endLine` for ranges) — if they don't match, search a few lines above and below for the matching `code` and use that location. Only consider a comment obsolete when `code` is nowhere nearby.
 - Range comments apply to the whole `line`..`endLine` span, not just the first line.
 - The repo's `.review/` directory is git-ignored via `.git/info/exclude`, so JSON edits don't show in `git status`.
