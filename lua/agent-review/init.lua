@@ -250,8 +250,6 @@ local function save(opts)
   opts = opts or {}
   if not state.json_path then return end
   local doc = {
-    version = 2,
-    repo = state.root,
     scope = state.scope or "working tree",
     createdAt = state.created_at or iso_now(),
     updatedAt = iso_now(),

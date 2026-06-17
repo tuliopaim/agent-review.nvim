@@ -96,8 +96,6 @@ opens, or `<leader>rc` is pressed in a regular buffer):
 
 ```json
 {
-  "version": 2,
-  "repo": "/abs/path/to/repo",
   "scope": "working tree",
   "createdAt": "2026-06-16T00:00:00Z",
   "updatedAt": "2026-06-16T00:00:00Z",
