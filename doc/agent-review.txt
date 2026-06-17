@@ -17,26 +17,34 @@ SETUP                                                     *agent-review-setup*
 >lua
     require("agent-review").setup()
 <
-This registers the |:ReviewStart|, |:ReviewComment| and |:ReviewRefresh|
-commands. `setup()` accepts an options table reserved for future use.
+This registers the |:ReviewDiff|, |:ReviewComment|, |:ReviewRefresh| and
+|:ReviewDelete| commands. `setup()` accepts an options table reserved for
+future use.
 
 ==============================================================================
 COMMANDS                                               *agent-review-commands*
 
-:ReviewStart [args]                                       *:ReviewStart*
+:ReviewDiff [args]                                        *:ReviewDiff*
     Open the Diffview review UI. Extra args are passed to |:DiffviewOpen|,
-    e.g. `:ReviewStart origin/main...HEAD`.
+    e.g. `:ReviewDiff origin/main...HEAD`.
 
 :ReviewComment                                            *:ReviewComment*
-    Add or edit a review comment on the current line.
+    Add or edit a review comment on the current line. Accepts a range, so
+    `:'<,'>ReviewComment` comments on the whole visual selection.
 
 :ReviewRefresh                                            *:ReviewRefresh*
     Reload comments from disk and re-render them.
 
+:ReviewDelete                                             *:ReviewDelete*
+    Completely delete the review: removes `<repo>/.review/comments.json`
+    (and the `.review/` dir if empty), clears all rendered comments and
+    deactivates the review. Prompts for confirmation.
+
 ==============================================================================
 MAPPINGS                                               *agent-review-mappings*
 
-<leader>rc   Add / edit review comment on the current line
+<leader>rc   Add / edit review comment on the current line. In visual mode,
+             comments on the whole selected line range.
 <leader>rd   Delete review comment
 <leader>rx   Toggle comment resolved
 <leader>rs   Save review
@@ -44,7 +52,8 @@ MAPPINGS                                               *agent-review-mappings*
 <leader>rn   Jump to next comment in buffer
 <leader>rp   Jump to previous comment in buffer
 <leader>rr   Refresh review
-<leader>rR   Start / restart the Diffview review
+<leader>rR   Restart review (clear comments)
+<leader>rD   Delete review (remove from disk)
 
 In the comment popup: <C-s> saves, q cancels.
 
@@ -54,6 +63,8 @@ DATA                                                      *agent-review-data*
 Comments are written to `<repo>/.review/comments.json`. Each entry has
 `file`, `side` ("new" working tree / "old" base revision), `line`, `code`
 (line text at comment time, used to re-anchor on drift), `body` and
-`resolved`. The `.review/` dir is added to `.git/info/exclude` automatically.
+`resolved`. Multi-line (range) comments also carry `endLine` and `endCode`
+and cover `line`..`endLine`; single-line comments omit them. The `.review/`
+dir is added to `.git/info/exclude` automatically.
 
 vim:tw=78:ts=8:ft=help:norl:

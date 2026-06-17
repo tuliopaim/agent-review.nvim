@@ -120,17 +120,48 @@ local function current_anchor()
   return lnum, { file = file, side = side, line = lnum, kind = "diffview", code = code, bufnr = bufnr }
 end
 
-local function anchor_id(anchor)
-  return table.concat({ anchor.file or "", anchor.side or "", tostring(anchor.line or 0) }, ":")
+-- Selection line range, read while still in visual mode ('v' = start, '.' = cursor).
+local function visual_range()
+  local s, e = vim.fn.getpos("v")[2], vim.fn.getpos(".")[2]
+  if s > e then s, e = e, s end
+  return s, e
+end
+
+local function range_anchor(bufnr, start_line, end_line)
+  if start_line > end_line then start_line, end_line = end_line, start_line end
+  local file = diffview_file_from_buf(bufnr)
+  if not file or file == "" then return nil end
+  local lines = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
+  return {
+    file = file,
+    side = diffview_side_from_buf(bufnr),
+    line = start_line,
+    endLine = end_line > start_line and end_line or nil,
+    code = lines[1] or "",
+    endCode = end_line > start_line and (lines[#lines] or "") or nil,
+    kind = "diffview",
+    bufnr = bufnr,
+  }
+end
+
+-- Find the unresolved comment whose [line, endLine] range covers lnum in bufnr.
+local function comment_covering(bufnr, lnum)
+  for key, c in pairs(state.comments) do
+    if c.bufnr == bufnr and c.line then
+      local last = c.endLine or c.line
+      if lnum >= c.line and lnum <= last then return key, c end
+    end
+  end
 end
 
 local function comment_from_anchor(anchor, body)
   return {
-    id = anchor_id(anchor),
     file = anchor.file,
     side = anchor.side,
     line = anchor.line,
+    endLine = anchor.endLine,
     code = anchor.code,
+    endCode = anchor.endCode,
     bufnr = anchor.bufnr,
     resolved = false,
     body = body,
@@ -154,14 +185,26 @@ local function render()
       if bufnr and vim.api.nvim_buf_is_valid(bufnr) and lnum then
         local line_count = vim.api.nvim_buf_line_count(bufnr)
         if lnum >= 1 and lnum <= line_count then
+          local last = math.min(comment.endLine or lnum, line_count)
+          -- Shade every line of a multi-line range.
+          if last > lnum then
+            for l = lnum, last do
+              pcall(vim.api.nvim_buf_set_extmark, bufnr, state.ns, l - 1, 0, {
+                line_hl_group = "ReviewRange",
+              })
+            end
+          end
           local body_lines = vim.split(comment.body or "", "\n", { plain = true })
           local virt = {}
           for i, body_line in ipairs(body_lines) do
             local prefix = i == 1 and "  💬 " or "     "
             table.insert(virt, { { prefix .. body_line, "Comment" } })
           end
-          table.insert(virt, { { "     [resolve: <leader>rx]", "Comment" } })
-          pcall(vim.api.nvim_buf_set_extmark, bufnr, state.ns, lnum - 1, 0, {
+          local hint = last > lnum and string.format("     [lines %d-%d] [resolve: <leader>rx]", lnum, last)
+            or "     [resolve: <leader>rx]"
+          table.insert(virt, { { hint, "Comment" } })
+          -- Anchor the bubble below the last line of the range.
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, state.ns, last - 1, 0, {
             virt_lines = virt,
             virt_lines_above = false,
           })
@@ -195,6 +238,8 @@ local function serializable_comments()
   for _, c in pairs(out_by_key) do
     local copy = vim.deepcopy(c)
     copy.bufnr = nil
+    copy.id = nil -- derived from file:side:line, never read back
+    copy.updatedAt = nil -- per-comment edit time is noise for consumers
     table.insert(out, copy)
   end
   table.sort(out, function(a, b) return comment_sort_key(a) < comment_sort_key(b) end)
@@ -260,13 +305,8 @@ local function edit_multiline(default, done)
   vim.cmd("startinsert")
 end
 
-local function add_or_edit_comment()
-  local _, anchor = current_anchor()
-  if not anchor then
-    notify("Not a commentable diff body line", vim.log.levels.WARN)
-    return
-  end
-  local key = comment_key(anchor)
+-- Open the editor for `anchor`, then upsert/remove the comment under `key`.
+local function edit_comment_for(anchor, key)
   local existing = state.comments[key] or state.hidden_comments[key]
   edit_multiline(existing and existing.body or "", function(input)
     if input == nil then return end
@@ -277,7 +317,6 @@ local function add_or_edit_comment()
       local updated = vim.tbl_extend("force", existing or {}, comment_from_anchor(anchor, input))
       updated.body = input
       updated.resolved = existing and existing.resolved or false
-      updated.updatedAt = iso_now()
       updated.bufnr = anchor.bufnr
       state.hidden_comments[key] = nil
       state.comments[key] = updated
@@ -287,10 +326,39 @@ local function add_or_edit_comment()
   end)
 end
 
+local function add_or_edit_comment()
+  local lnum, anchor = current_anchor()
+  if not anchor then
+    notify("Not a commentable diff body line", vim.log.levels.WARN)
+    return
+  end
+  -- If the cursor sits inside an existing range comment, edit that comment.
+  local covering_key, covering = comment_covering(anchor.bufnr, lnum)
+  if covering and comment_key(anchor) ~= covering_key then
+    edit_comment_for(covering, covering_key)
+    return
+  end
+  edit_comment_for(anchor, comment_key(anchor))
+end
+
+local function add_or_edit_range_comment(start_line, end_line)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local anchor = range_anchor(bufnr, start_line, end_line)
+  if not anchor then
+    notify("Not a commentable diff body line", vim.log.levels.WARN)
+    return
+  end
+  anchor.bufnr = bufnr
+  edit_comment_for(anchor, comment_key(anchor))
+end
+
 local function delete_comment()
   local lnum = vim.api.nvim_win_get_cursor(0)[1]
   local _, anchor = current_anchor()
   local key = anchor and comment_key(anchor) or tostring(lnum)
+  if not (state.comments[key] or state.hidden_comments[key]) then
+    key = comment_covering(vim.api.nvim_get_current_buf(), lnum) or key
+  end
   if state.comments[key] or state.hidden_comments[key] then
     state.comments[key] = nil
     state.hidden_comments[key] = nil
@@ -305,13 +373,15 @@ end
 local function toggle_resolved()
   local lnum, anchor = current_anchor()
   local key = anchor and comment_key(anchor) or tostring(lnum)
+  if not state.comments[key] then
+    key = comment_covering(vim.api.nvim_get_current_buf(), lnum) or key
+  end
   local comment = state.comments[key]
   if not comment then
     notify("No comment on this line", vim.log.levels.WARN)
     return
   end
   comment.resolved = not comment.resolved
-  comment.updatedAt = iso_now()
   if comment.resolved then
     state.comments[key] = nil
     state.hidden_comments[key] = comment
@@ -346,6 +416,51 @@ local function jump_comment(direction)
   vim.api.nvim_win_set_cursor(0, { target.line, 0 })
 end
 
+local function clear_rendered_comments()
+  for bufnr in pairs(state.attached_buffers) do
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      vim.api.nvim_buf_clear_namespace(bufnr, state.ns, 0, -1)
+    end
+  end
+end
+
+function M.delete()
+  if not state.active and not state.json_path then
+    notify("No review to delete", vim.log.levels.WARN)
+    return
+  end
+  local choice = vim.fn.confirm("Completely delete this review and its saved comments?", "&Cancel\n&Delete", 1)
+  if choice ~= 2 then return end
+
+  local json_path = state.json_path
+  if json_path and vim.fn.filereadable(json_path) == 1 then
+    local ok = pcall(vim.fn.delete, json_path)
+    if not ok then
+      notify("Failed to delete " .. json_path, vim.log.levels.ERROR)
+      return
+    end
+  end
+  -- Remove the .review/ directory if it is now empty.
+  local dir = json_path and vim.fn.fnamemodify(json_path, ":h")
+  if dir and vim.fn.isdirectory(dir) == 1 then
+    local entries = vim.fn.readdir(dir)
+    if type(entries) == "table" and #entries == 0 then
+      pcall(vim.fn.delete, dir, "d")
+    end
+  end
+
+  clear_rendered_comments()
+  state.comments = {}
+  state.hidden_comments = {}
+  state.attached_buffers = {}
+  state.json_path = nil
+  state.created_at = nil
+  state.active = false
+  did_save = true
+  force_redraw()
+  notify("Review deleted")
+end
+
 local function reset_review()
   local choice = vim.fn.confirm("Restart review and delete all saved comments?", "&Cancel\n&Restart", 1)
   if choice ~= 2 then return end
@@ -368,6 +483,11 @@ end
 local function map_review_keys(bufnr)
   local opts = { buffer = bufnr, silent = true, noremap = true }
   vim.keymap.set("n", "<leader>rc", add_or_edit_comment, vim.tbl_extend("force", opts, { desc = "Add/edit review comment" }))
+  vim.keymap.set("x", "<leader>rc", function()
+    local s, e = visual_range()
+    vim.cmd("normal! \27") -- leave visual mode
+    M.comment({ line1 = s, line2 = e })
+  end, vim.tbl_extend("force", opts, { desc = "Add/edit review comment on selection" }))
   vim.keymap.set("n", "<leader>rd", delete_comment, vim.tbl_extend("force", opts, { desc = "Delete review comment" }))
   vim.keymap.set("n", "<leader>rx", toggle_resolved, vim.tbl_extend("force", opts, { desc = "Toggle review comment resolved" }))
   vim.keymap.set("n", "<leader>rs", save, vim.tbl_extend("force", opts, { desc = "Save review" }))
@@ -379,6 +499,7 @@ local function map_review_keys(bufnr)
   vim.keymap.set("n", "<leader>rn", function() jump_comment(1) end, vim.tbl_extend("force", opts, { desc = "Next review comment" }))
   vim.keymap.set("n", "<leader>rp", function() jump_comment(-1) end, vim.tbl_extend("force", opts, { desc = "Previous review comment" }))
   vim.keymap.set("n", "<leader>rR", reset_review, vim.tbl_extend("force", opts, { desc = "Restart review (clear comments)" }))
+  vim.keymap.set("n", "<leader>rD", function() M.delete() end, vim.tbl_extend("force", opts, { desc = "Delete review (remove from disk)" }))
   vim.keymap.set("n", "<leader>rr", function() M.refresh() end, vim.tbl_extend("force", opts, { desc = "Refresh review" }))
 end
 
@@ -476,7 +597,7 @@ function M.start(args)
   notify("Review ready: <leader>rc edit, <leader>rd delete, <leader>rx resolve, <leader>rq save+quit")
 end
 
-function M.comment()
+function M.comment(range)
   if not state.active and not bootstrap({}) then return end
   local bufnr = vim.api.nvim_get_current_buf()
   local name = vim.api.nvim_buf_get_name(bufnr)
@@ -487,7 +608,11 @@ function M.comment()
   if not state.attached_buffers[bufnr] then
     attach_diffview_buffer(bufnr)
   end
-  add_or_edit_comment()
+  if range and range.line1 and range.line2 and range.line1 ~= range.line2 then
+    add_or_edit_range_comment(range.line1, range.line2)
+  else
+    add_or_edit_comment()
+  end
 end
 
 function M.refresh()
@@ -519,17 +644,27 @@ end
 
 -- Reserved for future options (keymap prefix, json path, ...). No behavior yet.
 function M.setup(_)
-  vim.api.nvim_create_user_command("ReviewStart", function(opts)
+  vim.api.nvim_set_hl(0, "ReviewRange", { link = "CursorLine", default = true })
+
+  vim.api.nvim_create_user_command("ReviewDiff", function(opts)
     M.start(opts.fargs)
   end, { nargs = "*", desc = "Open Diffview review UI" })
 
-  vim.api.nvim_create_user_command("ReviewComment", function()
-    M.comment()
-  end, { desc = "Add/edit review comment on current line" })
+  vim.api.nvim_create_user_command("ReviewComment", function(opts)
+    if opts.range > 0 then
+      M.comment({ line1 = opts.line1, line2 = opts.line2 })
+    else
+      M.comment()
+    end
+  end, { range = true, desc = "Add/edit review comment on current line or selection" })
 
   vim.api.nvim_create_user_command("ReviewRefresh", function()
     M.refresh()
   end, { desc = "Refresh review" })
+
+  vim.api.nvim_create_user_command("ReviewDelete", function()
+    M.delete()
+  end, { desc = "Completely delete review and saved comments" })
 end
 
 return M
