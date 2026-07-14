@@ -581,9 +581,22 @@ local function bootstrap(args)
   return true
 end
 
+local function diffview_is_open()
+  for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
+    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
+      local ft = vim.bo[vim.api.nvim_win_get_buf(win)].filetype
+      if ft and (ft:find("^Diffview") or ft == "diffview") then return true end
+    end
+  end
+  return false
+end
+
 function M.start(args)
   if state.active then
     M.refresh()
+    if not diffview_is_open() then
+      open_diffview()
+    end
     return
   end
   if not bootstrap(args) then return end
