@@ -24,12 +24,27 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 {
   "tuliopaim/agent-review.nvim",
   dependencies = { "sindrets/diffview.nvim" }, -- optional
-  cmd = { "ReviewDiff", "ReviewComment", "ReviewRefresh" },
+  cmd = { "ReviewDiff", "ReviewComment", "ReviewRefresh", "ReviewDelete" },
   keys = {
-    { "<leader>rR", function() require("agent-review").start({}) end, desc = "Open Diffview review" },
-    { "<leader>rr", function() require("agent-review").refresh() end, desc = "Refresh review" },
-    { "<leader>rc", function() require("agent-review").comment() end, desc = "Add review comment on current line" },
-    { "<leader>rc", mode = "x", "<cmd>'<,'>ReviewComment<cr>", desc = "Add review comment on selection" },
+    {
+      "<leader>rR",
+      function()
+        require("agent-review").start({})
+      end,
+      desc = "Open Diffview review",
+    },
+    {
+      "<leader>rr",
+      function()
+        require("agent-review").refresh()
+      end,
+      desc = "Refresh review",
+    },
+    {
+      "<leader>rc",
+      mode = { "n", "x" },
+      desc = "Add or edit review comment",
+    },
   },
   config = function()
     require("agent-review").setup()

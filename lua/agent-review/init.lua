@@ -478,14 +478,14 @@ local function reset_review()
   end
 end
 
+local function comment_visual_selection()
+  local s, e = visual_range()
+  vim.cmd("normal! \27") -- leave visual mode
+  M.comment({ line1 = s, line2 = e })
+end
+
 local function map_review_keys(bufnr)
   local opts = { buffer = bufnr, silent = true, noremap = true }
-  vim.keymap.set("n", "<leader>rc", add_or_edit_comment, vim.tbl_extend("force", opts, { desc = "Add/edit review comment" }))
-  vim.keymap.set("x", "<leader>rc", function()
-    local s, e = visual_range()
-    vim.cmd("normal! \27") -- leave visual mode
-    M.comment({ line1 = s, line2 = e })
-  end, vim.tbl_extend("force", opts, { desc = "Add/edit review comment on selection" }))
   vim.keymap.set("n", "<leader>rd", delete_comment, vim.tbl_extend("force", opts, { desc = "Delete review comment" }))
   vim.keymap.set("n", "<leader>rx", toggle_resolved, vim.tbl_extend("force", opts, { desc = "Toggle review comment resolved" }))
   vim.keymap.set("n", "<leader>rs", save, vim.tbl_extend("force", opts, { desc = "Save review" }))
@@ -666,6 +666,9 @@ function M.setup(_)
   vim.api.nvim_create_user_command("ReviewDelete", function()
     M.delete()
   end, { desc = "Completely delete review and saved comments" })
+
+  vim.keymap.set("n", "<leader>rc", function() M.comment() end, { desc = "Add/edit review comment" })
+  vim.keymap.set("x", "<leader>rc", comment_visual_selection, { desc = "Add/edit review comment on selection" })
 end
 
 return M
